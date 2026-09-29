@@ -7,6 +7,7 @@ require (
 	github.com/gmrtd/gmrtd v1.2.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
 	github.com/sirosfoundation/go-spocp v0.1.0

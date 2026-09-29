@@ -104,6 +104,12 @@ type IssuerConfig struct {
 	AuthenticSource string `yaml:"authentic_source" envconfig:"ISSUER_AUTHENTIC_SOURCE"`
 	// VCT is the Verifiable Credential Type for uploads.
 	VCT string `yaml:"vct" envconfig:"ISSUER_VCT"`
+	// IssuingAuthority is the Photo ID's issuing_authority_unicode (format
+	// mdoc only). Defaults to AuthenticSource.
+	IssuingAuthority string `yaml:"issuing_authority" envconfig:"ISSUER_ISSUING_AUTHORITY"`
+	// IssuingCountry is the Photo ID's issuing_country, ISO 3166-1 alpha-2
+	// (format mdoc only). Defaults to the scanned document's issuing country.
+	IssuingCountry string `yaml:"issuing_country" envconfig:"ISSUER_ISSUING_COUNTRY"`
 }
 
 // PolicyConfig points to the directory of .spoc rule files.

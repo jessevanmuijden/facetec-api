@@ -73,7 +73,9 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `issuer.cert_file` | `ISSUER_CERT_FILE` | *(optional)* | Client certificate for issuer mTLS |
 | `issuer.key_file` | `ISSUER_KEY_FILE` | *(optional)* | Client private key for issuer mTLS |
 | `issuer.scope` | `ISSUER_SCOPE` | *(required)* | Default credential scope URI |
-| `issuer.format` | `ISSUER_FORMAT` | `sdjwt` | Default credential format: `sdjwt`, `mdoc`, `vc20` |
+| `issuer.format` | `ISSUER_FORMAT` | `sdjwt` | Default credential format: `sdjwt`, `mdoc`, `vc20`. `mdoc` uploads an [EWC RFC013](https://github.com/EWC-consortium/eudi-wallet-rfcs/blob/main/ewc-rfc013-issue-photoid.md) Photo ID, see below |
+| `issuer.issuing_authority` | `ISSUER_ISSUING_AUTHORITY` | `issuer.authentic_source` | Photo ID `issuing_authority_unicode` (`mdoc` only) |
+| `issuer.issuing_country` | `ISSUER_ISSUING_COUNTRY` | scanned document's country | Photo ID `issuing_country`, ISO 3166-1 alpha-2 (`mdoc` only) |
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
@@ -148,6 +150,31 @@ tenants:
     policy:
       rules_dir: "/etc/facetec-api/rules/gov"
 ```
+
+### Photo ID (`format: mdoc`)
+
+With `format: mdoc`, the uploaded `document_data` holds the data elements of an
+[EWC RFC013](https://github.com/EWC-consortium/eudi-wallet-rfcs/blob/main/ewc-rfc013-issue-photoid.md)
+Photo ID (doctype `eu.europa.ec.eudi.photoid.1`, ISO/IEC TS 23220-4 Annex C),
+flat and keyed by element identifier; the vc issuer places each one in its
+namespace from the scope's MDDL schema. The scope must therefore be an
+`mso_mdoc` credential type with that doctype.
+
+| Element | Namespace | Source |
+|---|---|---|
+| `family_name_unicode`, `given_name_unicode` | `org.iso.23220.1` | document |
+| `birth_date`, `age_over_18`, `age_in_years`, `age_birth_year` | `org.iso.23220.1` | document date of birth |
+| `portrait` | `org.iso.23220.1` | chip DG2 face image; JPEG 2000 is transcoded to JPEG so wallets can display it |
+| `sex` (ISO/IEC 5218), `nationality` | `org.iso.23220.1` | document |
+| `issue_date` | `org.iso.23220.1` | date of issuance |
+| `expiry_date` | `org.iso.23220.1` | document date of expiry |
+| `issuing_authority_unicode`, `issuing_country` | `org.iso.23220.1` | configuration (see above) |
+| `document_number` | `org.iso.23220.1` | the attestation's document ID |
+| `travel_document_number` | `org.iso.23220.photoid.1` | document number |
+
+Being an mdoc, every element is individually selectively disclosable. The
+optional `org.iso.23220.dtc.1` namespace (raw DG1/DG2/SOD) is not issued: raw
+chip data never leaves this service.
 
 ## API
 
