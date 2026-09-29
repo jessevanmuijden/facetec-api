@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -315,16 +316,6 @@ func (c *Client) Ready() error {
 // P2: only the credential-schema fields are forwarded via MapDocumentData — MRZ lines
 // and internal FaceTec metadata are excluded by the mapper and never leave this service.
 func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult, issuer tenant.IssuerParams) (documentID string, offerURL string, err error) {
-	claims := MapDocumentData(result.IDScan.DocumentData)
-	data, err := json.Marshal(claims)
-	if err != nil {
-		return "", "", fmt.Errorf("marshal credential claims: %w", err)
-	}
-	var docDataMap map[string]any
-	if err := json.Unmarshal(data, &docDataMap); err != nil {
-		return "", "", fmt.Errorf("unmarshal credential claims: %w", err)
-	}
-
 	authenticSource := c.cfg.Issuer.AuthenticSource
 	if authenticSource == "" {
 		authenticSource = "facetec-api"
@@ -335,6 +326,11 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 		return "", "", fmt.Errorf("generate document ID: %w", err)
 	}
 	documentID = "ft-" + hex.EncodeToString(b)
+
+	docDataMap, err := c.credentialClaims(result.IDScan.DocumentData, documentID, authenticSource, issuer.Format)
+	if err != nil {
+		return "", "", err
+	}
 
 	uploadReq := &issuerclient.UploadRequest{
 		Meta: &issuerclient.MetaData{
@@ -366,6 +362,32 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 	}
 
 	return documentID, preauthReply.CredentialOfferURL, nil
+}
+
+// credentialClaims returns the document_data uploaded to the vc apigw for the
+// tenant's credential format. mdoc issues an EWC RFC013 Photo ID (see
+// MapPhotoIDClaims); every other format keeps the flat CredentialClaims shape.
+func (c *Client) credentialClaims(doc facetec.DocumentData, documentID, authenticSource, format string) (map[string]any, error) {
+	if format == "mdoc" {
+		authority := c.cfg.Issuer.IssuingAuthority
+		if authority == "" {
+			authority = authenticSource
+		}
+		return MapPhotoIDClaims(doc, documentID, PhotoIDIssuer{
+			Authority: authority,
+			Country:   c.cfg.Issuer.IssuingCountry,
+		}, time.Now()), nil
+	}
+
+	data, err := json.Marshal(MapDocumentData(doc))
+	if err != nil {
+		return nil, fmt.Errorf("marshal credential claims: %w", err)
+	}
+	var docDataMap map[string]any
+	if err := json.Unmarshal(data, &docDataMap); err != nil {
+		return nil, fmt.Errorf("unmarshal credential claims: %w", err)
+	}
+	return docDataMap, nil
 }
 
 // buildFaceTecHTTPClient constructs an *http.Client with the TLS configuration
