@@ -23,6 +23,21 @@ const (
 	// (FaceTec Server's nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP),
 	// so the assurance level required for issuance was not met.
 	CodeNFCSkipped Code = "nfc_skipped"
+	// CodeNFCNotSupportedByDocument indicates the document has no chip
+	// FaceTec reads (nfcStatusEnumInt == NO_NFC_SPECIFIED_BY_TEMPLATE); the
+	// user was never prompted and a chipped document is needed.
+	CodeNFCNotSupportedByDocument Code = "nfc_not_supported_by_document"
+	// CodeNFCDeviceNotCapable indicates the device could not read NFC
+	// (nfcStatusEnumInt == NFC_REQUESTED_BUT_DEVICE_NOT_CAPABLE), e.g. no NFC
+	// hardware or NFC switched off.
+	CodeNFCDeviceNotCapable Code = "nfc_device_not_capable"
+	// CodeNFCChipReadFailed indicates the chip read was attempted but failed
+	// (nfcStatusEnumInt == NFC_REQUESTED_BUT_ERROR_ACCESSING_CHIP).
+	CodeNFCChipReadFailed Code = "nfc_chip_read_failed"
+	// CodeNFCNotAuthenticated indicates the chip was not authenticated
+	// (nfcAuthenticationStatusEnumInt != AUTHENTICATED), including a chip that
+	// was read but failed authentication.
+	CodeNFCNotAuthenticated Code = "nfc_not_authenticated"
 	// CodeIssuanceFailed indicates credential issuance failed after successful verification.
 	CodeIssuanceFailed Code = "issuance_failed"
 	// CodeInternalError indicates an unexpected internal error.

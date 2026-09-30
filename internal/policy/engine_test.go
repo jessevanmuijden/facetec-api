@@ -214,3 +214,58 @@ func TestEvaluateScan_BoundaryLiveness_ExactThreshold(t *testing.T) {
 		t.Errorf("expected acceptance at exact threshold, got: %v", err)
 	}
 }
+
+// TestDefaultRules_RequireAuthenticatedChip loads the shipped
+// rules/default.spoc and checks that no document is accepted, for accept or
+// review, without an authenticated NFC chip (#65) -- including driving
+// licences verified only by barcode, which the default rules used to accept.
+func TestDefaultRules_RequireAuthenticatedChip(t *testing.T) {
+	e, err := New(filepath.Join("..", "..", "rules"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	scan := func(docType string, mrz, nfc, barcode bool) facetec.ScanResult {
+		return facetec.ScanResult{
+			Liveness: facetec.LivenessCheckResult{LivenessScore: 0.95},
+			IDScan: facetec.IDScanResult{
+				FaceMatchLevel:  8,
+				DocumentData:    facetec.DocumentData{DocumentType: docType},
+				MRZVerified:     mrz,
+				NFCVerified:     nfc,
+				BarcodeVerified: barcode,
+			},
+		}
+	}
+
+	accepted := []struct {
+		name string
+		scan facetec.ScanResult
+	}{
+		{"passport with MRZ and chip", scan("passport", true, true, false)},
+		{"ID card with chip", scan("id_card", true, true, false)},
+		{"ID card with chip, MRZ not verified", scan("id_card", false, true, false)},
+		{"driving licence with chip", scan("dl", false, true, false)},
+	}
+	for _, tt := range accepted {
+		if err := e.EvaluateScan(tt.scan); err != nil {
+			t.Errorf("%s: want accepted, got %v", tt.name, err)
+		}
+	}
+
+	rejected := []struct {
+		name string
+		scan facetec.ScanResult
+	}{
+		{"passport without chip", scan("passport", true, false, false)},
+		{"passport with chip, MRZ not verified", scan("passport", false, true, false)},
+		{"ID card without chip", scan("id_card", true, false, false)},
+		{"driving licence with barcode, no chip", scan("dl", false, false, true)},
+		{"unknown document with chip", scan("", true, true, true)},
+	}
+	for _, tt := range rejected {
+		if err := e.EvaluateScan(tt.scan); err == nil {
+			t.Errorf("%s: want rejected, got accepted", tt.name)
+		}
+	}
+}
