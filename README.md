@@ -266,20 +266,31 @@ Scan acceptance is a two-stage process:
 Rules are loaded at startup (and re-loaded on SIGHUP). If the rules directory is empty or
 `policy.rules_dir` is unset, the service starts but rejects all scans and reports not-ready.
 
-```scheme
-; rules/default.spoc
-; Accept passports with MRZ verification.
-(facetec-scan (doc-type passport) (mrz-verified true))
+No credential is ever issued without an authenticated NFC chip
+(`nfcAuthenticationStatusEnumInt` = AUTHENTICATED). `/process-request` refuses
+such scans before the rules are evaluated, so a rule cannot re-admit them, and
+the shipped rules require `(nfc-verified true)` as well:
 
-; Accept e-passports with NFC chip verification.
+```scheme
+; rules/default.spoc (thresholds omitted)
+; Accept e-passports: MRZ and NFC chip verified.
 (facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified true))
 
-; Accept driving licences with barcode verification.
-(facetec-scan (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
-
-; Accept national ID cards (numeric thresholds from config still apply).
-(facetec-scan (doc-type id_card))
+; Accept ID cards and driving licences with an NFC chip. "(mrz-verified)"
+; with no value accepts either outcome.
+(facetec-scan (doc-type id_card) (mrz-verified) (nfc-verified true))
+(facetec-scan (doc-type dl) (mrz-verified) (nfc-verified true))
 ```
+
+A scan without an authenticated chip gets a `credentialIssueErrorCode` (with a message in `credentialIssueError`):
+
+| Code | FaceTec `nfcStatusEnumInt` | Meaning |
+|------|----------------------------|---------|
+| `nfc_not_requested` | 0 `NO_NFC_SPECIFIED_BY_TEMPLATE` | FaceTec's template for the document requests no chip read, so the user was never prompted; the document may still have a chip |
+| `nfc_device_not_capable` | 1 `NFC_REQUESTED_BUT_DEVICE_NOT_CAPABLE` | the phone cannot read NFC (or it is switched off) |
+| `nfc_skipped` | 2 `NFC_REQUESTED_BUT_USER_PRESSED_SKIP` | the user skipped the chip read |
+| `nfc_chip_read_failed` | 3 `NFC_REQUESTED_BUT_ERROR_ACCESSING_CHIP` | the chip could not be read |
+| `nfc_not_authenticated` | 4 `SUCCESS` or absent | the chip was read but not authenticated |
 
 Query fields available in every SPOCP query:
 
