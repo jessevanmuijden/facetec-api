@@ -296,7 +296,7 @@ func nfcRejection(r facetec.IDScanResult) (code idverrors.Code, msg string, reje
 	}
 	switch r.NFCStatus {
 	case facetec.NFCStatusNotSpecifiedByTemplate:
-		return idverrors.CodeNFCNotSupportedByDocument, "the document has no NFC chip that can be read", true
+		return idverrors.CodeNFCNotRequested, "no NFC chip read was requested for this document", true
 	case facetec.NFCStatusDeviceNotCapable:
 		return idverrors.CodeNFCDeviceNotCapable, "the device could not read the NFC chip", true
 	case facetec.NFCStatusUserSkipped:

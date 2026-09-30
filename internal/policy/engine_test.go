@@ -216,9 +216,10 @@ func TestEvaluateScan_BoundaryLiveness_ExactThreshold(t *testing.T) {
 }
 
 // TestDefaultRules_RequireAuthenticatedChip loads the shipped
-// rules/default.spoc and checks that no document is accepted, for accept or
-// review, without an authenticated NFC chip (#65) -- including driving
-// licences verified only by barcode, which the default rules used to accept.
+// rules/default.spoc and checks that its accept rules admit no document
+// without an authenticated NFC chip (#65) -- including driving licences
+// verified only by barcode, which the default rules used to accept. The
+// review rules are covered by TestDefaultRules_ReviewRequiresAuthenticatedChip.
 func TestDefaultRules_RequireAuthenticatedChip(t *testing.T) {
 	e, err := New(filepath.Join("..", "..", "rules"))
 	if err != nil {
@@ -266,6 +267,59 @@ func TestDefaultRules_RequireAuthenticatedChip(t *testing.T) {
 	for _, tt := range rejected {
 		if err := e.EvaluateScan(tt.scan); err == nil {
 			t.Errorf("%s: want rejected, got accepted", tt.name)
+		}
+	}
+}
+
+// TestDefaultRules_ReviewRequiresAuthenticatedChip queries the shipped
+// facetec-scan-review rules directly (EvaluateScan only asks the accept
+// head): a borderline scan -- below the accept thresholds, within review's --
+// is escalated only when its chip was authenticated.
+func TestDefaultRules_ReviewRequiresAuthenticatedChip(t *testing.T) {
+	e, err := New(filepath.Join("..", "..", "rules"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	borderline := func(docType string, mrz, nfc, barcode bool) facetec.ScanResult {
+		return facetec.ScanResult{
+			Liveness: facetec.LivenessCheckResult{LivenessScore: 0.70},
+			IDScan: facetec.IDScanResult{
+				FaceMatchLevel:  5,
+				DocumentData:    facetec.DocumentData{DocumentType: docType},
+				MRZVerified:     mrz,
+				NFCVerified:     nfc,
+				BarcodeVerified: barcode,
+			},
+		}
+	}
+	review := func(r facetec.ScanResult) bool {
+		return e.engine.QueryElement(buildQuery(reviewHead, r))
+	}
+
+	if err := e.EvaluateScan(borderline("passport", true, true, false)); err == nil {
+		t.Fatal("a borderline scan must not pass the accept rules, or this test proves nothing")
+	}
+
+	escalated := map[string]facetec.ScanResult{
+		"passport with MRZ and chip": borderline("passport", true, true, false),
+		"ID card with chip":          borderline("id_card", false, true, false),
+		"driving licence with chip":  borderline("dl", false, true, false),
+	}
+	for name, r := range escalated {
+		if !review(r) {
+			t.Errorf("%s: want escalated for review", name)
+		}
+	}
+
+	notEscalated := map[string]facetec.ScanResult{
+		"passport without chip":                 borderline("passport", true, false, false),
+		"ID card without chip":                  borderline("id_card", true, false, false),
+		"driving licence with barcode, no chip": borderline("dl", false, false, true),
+	}
+	for name, r := range notEscalated {
+		if review(r) {
+			t.Errorf("%s: want not escalated", name)
 		}
 	}
 }

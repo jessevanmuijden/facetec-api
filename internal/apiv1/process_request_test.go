@@ -161,7 +161,7 @@ func TestProcessRequest_ChipNotAuthenticated_RejectsWithoutIssuing(t *testing.T)
 		nfcAuthStatus int
 		want          idverrors.Code
 	}{
-		{"template requests no NFC", 0, 0, idverrors.CodeNFCNotSupportedByDocument},
+		{"template requests no NFC", 0, 0, idverrors.CodeNFCNotRequested},
 		{"device not capable", 1, 0, idverrors.CodeNFCDeviceNotCapable},
 		{"user skipped", 2, 0, idverrors.CodeNFCSkipped},
 		{"error accessing chip", 3, 0, idverrors.CodeNFCChipReadFailed},

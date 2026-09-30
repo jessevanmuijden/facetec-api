@@ -23,10 +23,12 @@ const (
 	// (FaceTec Server's nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP),
 	// so the assurance level required for issuance was not met.
 	CodeNFCSkipped Code = "nfc_skipped"
-	// CodeNFCNotSupportedByDocument indicates the document has no chip
-	// FaceTec reads (nfcStatusEnumInt == NO_NFC_SPECIFIED_BY_TEMPLATE); the
-	// user was never prompted and a chipped document is needed.
-	CodeNFCNotSupportedByDocument Code = "nfc_not_supported_by_document"
+	// CodeNFCNotRequested indicates FaceTec's template for the detected
+	// document did not request an NFC read (nfcStatusEnumInt ==
+	// NO_NFC_SPECIFIED_BY_TEMPLATE), so the user was never prompted. It does
+	// not establish that the document has no chip -- only that FaceTec does
+	// not read one for this document type.
+	CodeNFCNotRequested Code = "nfc_not_requested"
 	// CodeNFCDeviceNotCapable indicates the device could not read NFC
 	// (nfcStatusEnumInt == NFC_REQUESTED_BUT_DEVICE_NOT_CAPABLE), e.g. no NFC
 	// hardware or NFC switched off.

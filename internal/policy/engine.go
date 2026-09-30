@@ -72,7 +72,7 @@ func New(rulesDir string) (*Engine, error) {
 // so that range predicates in the rules can enforce numeric thresholds.
 // Returns nil if the scan is accepted by at least one rule.
 func (e *Engine) EvaluateScan(result facetec.ScanResult) error {
-	query := buildQueryElement(result)
+	query := buildQuery(acceptHead, result)
 	if !e.engine.QueryElement(query) {
 		return fmt.Errorf("policy: scan rejected by policy rules")
 	}
@@ -84,7 +84,15 @@ func (e *Engine) RuleCount() int {
 	return e.engine.RuleCount()
 }
 
-// buildQueryElement converts a ScanResult into a SPOCP S-expression element.
+// Rule heads: acceptHead rules accept a scan; reviewHead rules (ETSI 119 461
+// §4.5 escalation, see rules/default.spoc) mark one for operator review.
+const (
+	acceptHead = "facetec-scan"
+	reviewHead = "facetec-scan-review"
+)
+
+// buildQuery converts a ScanResult into a SPOCP S-expression element with the
+// given rule head.
 // Numeric fields are formatted as zero-padded fixed-width integers so that
 // lexicographic comparison in RangeNumeric star-forms matches numeric order:
 //   - liveness-score: 3-digit zero-padded (000–100)
@@ -92,9 +100,9 @@ func (e *Engine) RuleCount() int {
 //
 // Field order: liveness-score, face-match-level, doc-type, mrz-verified,
 // nfc-verified, barcode-verified.
-func buildQueryElement(r facetec.ScanResult) sexp.Element {
+func buildQuery(head string, r facetec.ScanResult) sexp.Element {
 	livenessScore := int(r.Liveness.LivenessScore * 100)
-	return sexp.NewList("facetec-scan",
+	return sexp.NewList(head,
 		sexp.NewList("liveness-score", sexp.NewAtom(fmt.Sprintf("%03d", livenessScore))),
 		sexp.NewList("face-match-level", sexp.NewAtom(fmt.Sprintf("%02d", r.IDScan.FaceMatchLevel))),
 		sexp.NewList("doc-type", sexp.NewAtom(docType(r))),

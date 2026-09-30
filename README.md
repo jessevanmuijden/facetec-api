@@ -282,11 +282,11 @@ the shipped rules require `(nfc-verified true)` as well:
 (facetec-scan (doc-type dl) (mrz-verified) (nfc-verified true))
 ```
 
-A scan without an authenticated chip gets `credentialIssueErrCode`:
+A scan without an authenticated chip gets a `credentialIssueErrorCode` (with a message in `credentialIssueError`):
 
 | Code | FaceTec `nfcStatusEnumInt` | Meaning |
 |------|----------------------------|---------|
-| `nfc_not_supported_by_document` | 0 `NO_NFC_SPECIFIED_BY_TEMPLATE` | the document has no chip FaceTec reads; the user was never prompted |
+| `nfc_not_requested` | 0 `NO_NFC_SPECIFIED_BY_TEMPLATE` | FaceTec's template for the document requests no chip read, so the user was never prompted; the document may still have a chip |
 | `nfc_device_not_capable` | 1 `NFC_REQUESTED_BUT_DEVICE_NOT_CAPABLE` | the phone cannot read NFC (or it is switched off) |
 | `nfc_skipped` | 2 `NFC_REQUESTED_BUT_USER_PRESSED_SKIP` | the user skipped the chip read |
 | `nfc_chip_read_failed` | 3 `NFC_REQUESTED_BUT_ERROR_ACCESSING_CHIP` | the chip could not be read |
