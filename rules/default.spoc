@@ -12,6 +12,9 @@
 ; Default thresholds: liveness >= 80, face-match >= 06.
 ; To tighten or relax thresholds per deployment, edit these rules directly.
 
+; Note that Facetec itself has a configuration for minimum 3D:2D match level that will be used 
+; to trigger a warning about "manual review" in the device SDK. This is not covered by these rules.
+
 ; Accept passports with MRZ verification
 (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true))
 ; Accept driving licences with barcode verification
