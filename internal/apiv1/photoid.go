@@ -7,18 +7,6 @@ import (
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
 )
 
-// PhotoIDIssuer describes the party that issues the Photo ID attestation.
-// Under EWC RFC013 the attestation is issued by the QTSP that performed the
-// identity proofing, not by the authority that issued the scanned passport,
-// so these values come from configuration rather than from the document.
-type PhotoIDIssuer struct {
-	// Authority is the org.iso.23220.1 issuing_authority_unicode value.
-	Authority string
-	// Country is the org.iso.23220.1 issuing_country value (ISO 3166-1
-	// alpha-2). When empty, the scanned document's issuing country is used.
-	Country string
-}
-
 // MapPhotoIDClaims converts a DocumentData to the flat data-element map the
 // vc apigw needs to issue an EWC RFC013 Photo ID (doctype
 // eu.europa.ec.eudi.photoid.1, ISO/IEC TS 23220-4 Annex C) as an mso_mdoc.
@@ -31,25 +19,24 @@ type PhotoIDIssuer struct {
 // issue_date and expiry_date describe the attestation itself: it is issued
 // now and expires with the travel document it was derived from. The passport
 // number is carried as travel_document_number; document_number identifies
-// the attestation, so it is set to documentID.
+// the attestation, so it is set to documentID. issuing_country is the
+// scanned document's issuing country; issuing_authority_unicode names the
+// party issuing the attestation (the QTSP of RFC013) and comes from
+// configuration, since it is not on the document.
 //
 // Only the elements the RFC013 schema declares are produced. MRZ lines and
 // raw NFC data groups (the optional org.iso.23220.dtc.1 namespace) are
 // excluded by design and never leave this service.
-func MapPhotoIDClaims(doc facetec.DocumentData, documentID string, issuer PhotoIDIssuer, now time.Time) map[string]any {
+func MapPhotoIDClaims(doc facetec.DocumentData, documentID, issuingAuthority string, now time.Time) map[string]any {
 	now = now.UTC()
-	issuingCountry := toISO3166Alpha2(issuer.Country)
-	if issuingCountry == "" {
-		issuingCountry = toISO3166Alpha2(doc.IssuingCountry)
-	}
 
 	claims := map[string]any{
 		// org.iso.23220.1
 		"family_name_unicode":       doc.FamilyName,
 		"given_name_unicode":        doc.GivenName,
 		"issue_date":                now.Format("2006-01-02"),
-		"issuing_authority_unicode": issuer.Authority,
-		"issuing_country":           issuingCountry,
+		"issuing_authority_unicode": issuingAuthority,
+		"issuing_country":           toISO3166Alpha2(doc.IssuingCountry),
 		"sex":                       mapSexToISO5218(doc.Sex),
 		"document_number":           documentID,
 		// org.iso.23220.photoid.1

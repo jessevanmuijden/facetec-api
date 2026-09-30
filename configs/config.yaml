@@ -60,9 +60,8 @@ issuer:
   # EWC RFC013 Photo ID (doctype eu.europa.ec.eudi.photoid.1); see README.md.
   format: "sdjwt"
 
-  # Photo ID issuer identity, used with format: mdoc only.
+  # Photo ID issuing authority, used with format: mdoc only.
   # issuing_authority: "Example QTSP"   # default: authentic_source
-  # issuing_country: "SE"               # default: the scanned document's country
 
 # ── SPOCP Policy ──────────────────────────────────────────────────────────────
 policy:

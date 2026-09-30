@@ -373,10 +373,7 @@ func (c *Client) credentialClaims(doc facetec.DocumentData, documentID, authenti
 		if authority == "" {
 			authority = authenticSource
 		}
-		return MapPhotoIDClaims(doc, documentID, PhotoIDIssuer{
-			Authority: authority,
-			Country:   c.cfg.Issuer.IssuingCountry,
-		}, time.Now()), nil
+		return MapPhotoIDClaims(doc, documentID, authority, time.Now()), nil
 	}
 
 	data, err := json.Marshal(MapDocumentData(doc))

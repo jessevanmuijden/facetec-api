@@ -62,7 +62,7 @@ func testJPEG(img image.Image) []byte {
 
 func TestMapPhotoIDClaims(t *testing.T) {
 	doc := photoIDDocument()
-	claims := MapPhotoIDClaims(doc, "ft-abc", PhotoIDIssuer{Authority: "SIROS Foundation", Country: "se"}, photoIDNow)
+	claims := MapPhotoIDClaims(doc, "ft-abc", "SIROS Foundation", photoIDNow)
 
 	assert.Equal(t, map[string]any{
 		"family_name_unicode":       "De Bruijn",
@@ -72,7 +72,7 @@ func TestMapPhotoIDClaims(t *testing.T) {
 		"issue_date":                "2026-09-29",
 		"expiry_date":               "2031-08-02",
 		"issuing_authority_unicode": "SIROS Foundation",
-		"issuing_country":           "SE",
+		"issuing_country":           "NL",
 		"sex":                       2,
 		"nationality":               "NL",
 		"document_number":           "ft-abc",
@@ -83,19 +83,14 @@ func TestMapPhotoIDClaims(t *testing.T) {
 	}, claims)
 }
 
-func TestMapPhotoIDClaims_IssuingCountryFallsBackToDocument(t *testing.T) {
-	claims := MapPhotoIDClaims(photoIDDocument(), "ft-abc", PhotoIDIssuer{Authority: "x"}, photoIDNow)
-	assert.Equal(t, "NL", claims["issuing_country"])
-}
-
 func TestMapPhotoIDClaims_AgeTurnsOnBirthday(t *testing.T) {
 	doc := photoIDDocument()
 	doc.DateOfBirth = "2008-09-30"
-	claims := MapPhotoIDClaims(doc, "ft-abc", PhotoIDIssuer{}, photoIDNow)
+	claims := MapPhotoIDClaims(doc, "ft-abc", "", photoIDNow)
 	assert.Equal(t, false, claims["age_over_18"])
 	assert.Equal(t, 17, claims["age_in_years"])
 
-	claims = MapPhotoIDClaims(doc, "ft-abc", PhotoIDIssuer{}, photoIDNow.Add(24*time.Hour))
+	claims = MapPhotoIDClaims(doc, "ft-abc", "", photoIDNow.Add(24*time.Hour))
 	assert.Equal(t, true, claims["age_over_18"])
 	assert.Equal(t, 18, claims["age_in_years"])
 }
@@ -108,14 +103,14 @@ func TestMapPhotoIDClaims_UnparseableDatesOmitted(t *testing.T) {
 	doc.DateOfBirth = "10 MAA 1965"
 	doc.DateOfExpiry = ""
 	doc.Portrait = ""
-	claims := MapPhotoIDClaims(doc, "ft-abc", PhotoIDIssuer{}, photoIDNow)
+	claims := MapPhotoIDClaims(doc, "ft-abc", "", photoIDNow)
 	for _, k := range []string{"birth_date", "age_over_18", "age_in_years", "age_birth_year", "expiry_date", "portrait"} {
 		assert.NotContains(t, claims, k)
 	}
 }
 
 func TestMapPhotoIDClaims_ExcludesMRZ(t *testing.T) {
-	data, err := json.Marshal(MapPhotoIDClaims(photoIDDocument(), "ft-abc", PhotoIDIssuer{}, photoIDNow))
+	data, err := json.Marshal(MapPhotoIDClaims(photoIDDocument(), "ft-abc", "", photoIDNow))
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "NLDDE<BRUIJN")
 }
