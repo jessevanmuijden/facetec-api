@@ -77,6 +77,9 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `issuer.issuing_authority` | `ISSUER_ISSUING_AUTHORITY` | `issuer.authentic_source` | Photo ID `issuing_authority_unicode` (`mdoc` only) |
 | `issuer.issuing_country` | `ISSUER_ISSUING_COUNTRY` | scanned document's country | Photo ID `issuing_country`, ISO 3166-1 alpha-2 (`mdoc` only) |
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
+| `trust.pdp_url` | `TRUST_PDP_URL` | *(empty)* | Base origin of the go-trust AuthZEN PDP (must be `https`, no path; plain `http` only for localhost) that decides whether an eMRTD document signer chains to a reviewed CSCA (`POST {url}/evaluation`). Empty = unconfigured: chips are verified locally but never reported as trusted |
+| `trust.timeout` | `TRUST_TIMEOUT` | `5s` | Timeout of each PDP request attempt (one retry, transport errors only) |
+| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any passport scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -267,19 +270,25 @@ Rules are loaded at startup (and re-loaded on SIGHUP). If the rules directory is
 `policy.rules_dir` is unset, the service starts but rejects all scans and reports not-ready.
 
 No credential is ever issued without an authenticated NFC chip
-(`nfcAuthenticationStatusEnumInt` = AUTHENTICATED). `/process-request` refuses
+(`nfcAuthenticationStatusEnumInt` = 4 AUTHENTICATED: clone detection via Active/Chip
+Authentication plus FaceTec's signature verification). `/process-request` refuses
 such scans before the rules are evaluated, so a rule cannot re-admit them, and
-the shipped rules require `(nfc-verified true)` as well:
+the shipped rules require `(nfc-verified true)` as well. Passports additionally
+require `(chip-trusted true)`: both checks, not either:
 
 ```scheme
-; rules/default.spoc (thresholds omitted)
-; Accept e-passports: MRZ and NFC chip verified.
-(facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified true))
+; rules/default.spoc (accept rules)
+; Matching is positional: every rule lists the query fields in order
+; (liveness-score, face-match-level, doc-type, mrz-verified, nfc-verified,
+; barcode-verified, chip-trusted) and may stop early, but never skips one.
+; Accept e-passports: MRZ verified, chip authenticated AND trusted by the go-trust PDP.
+; The (barcode-verified ...) placeholder is needed to reach chip-trusted.
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true) (nfc-verified true) (barcode-verified (* set true false)) (chip-trusted true))
 
-; Accept ID cards and driving licences with an NFC chip. "(mrz-verified)"
+; Accept ID cards and driving licences with an authenticated NFC chip. "(mrz-verified)"
 ; with no value accepts either outcome.
-(facetec-scan (doc-type id_card) (mrz-verified) (nfc-verified true))
-(facetec-scan (doc-type dl) (mrz-verified) (nfc-verified true))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type id_card) (mrz-verified) (nfc-verified true))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type dl) (mrz-verified) (nfc-verified true))
 ```
 
 A scan without an authenticated chip gets a `credentialIssueErrorCode` (with a message in `credentialIssueError`):
@@ -300,6 +309,21 @@ Query fields available in every SPOCP query:
 | `mrz-verified` | `true`, `false` |
 | `nfc-verified` | `true`, `false` |
 | `barcode-verified` | `true`, `false` |
+| `chip-trusted` | `true`, `false` |
+
+Field order in the query is: `liveness-score`, `face-match-level`, `doc-type`, `mrz-verified`,
+`nfc-verified`, `barcode-verified`, `chip-trusted`. Matching is positional, so a rule that
+constrains `chip-trusted` must list the fields before it (`(* set true false)` matches either value).
+
+`nfc-verified` is FaceTec's own chip authentication (status 4: clone detection plus signature
+verification against the DSC embedded in the same chip); it proves the chip is genuine hardware
+holding intact data, not that the data was signed by a state we trust. `chip-trusted` is `true`
+only when facetec-api itself verified the SOD signature, every data-group hash and the DG1/MRZ
+cross-check, **and** the go-trust PDP trusts the DSC for the issuing state
+(see [ADR-002](docs/adr/002-emrtd-document-signer-trust.md)). Passports need both. Passports whose
+chips lack Active/Chip Authentication (status 1) are therefore refused by design; this is a known
+coverage trade-off. With `trust.required` (passports only), a scan that passes the NFC gate (status 4) but whose raw
+chip data is missing or untrusted is refused with `chip_untrusted`.
 
 ## ETSI 119 461 §4.5 Compliance
 

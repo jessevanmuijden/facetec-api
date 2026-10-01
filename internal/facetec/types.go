@@ -57,6 +57,32 @@ type IDScanResult struct {
 	// hence json:"-" rather than a zero value that would read as
 	// NFCStatusNotSpecifiedByTemplate.
 	NFCStatus int `json:"-"`
+
+	// ChipAuthStatus is FaceTec's nfcAuthenticationStatusEnumInt: 0 N/A,
+	// 1 NOT_SUPPORTED_BY_DOCUMENT (no AA/CA on the chip), 2 NOT_SUPPORTED_BY_SDK,
+	// 3 FAILED, 4 AUTHENTICATED, 5 FAILED_DUE_TO_SIGNATURE_VERIFICATION. Only 4
+	// (NFCVerified) is accepted; 3 and 5 are refused as nfc_not_authenticated.
+	// Only set by ExtractScanResult.
+	ChipAuthStatus int `json:"chipAuthStatus"`
+	// ChipTrusted is true only when facetec-api itself verified the SOD and
+	// data-group hashes AND the go-trust PDP trusts the DSC for the issuing
+	// state. FaceTec's own checks never contribute to it. Set by the caller
+	// (see apiv1), never by ExtractScanResult.
+	ChipTrusted bool `json:"chipTrusted"`
+	// ChipTrustReason is a machine-readable reason code ("ok" when trusted).
+	ChipTrustReason string `json:"chipTrustReason,omitempty"`
+	// ChipDSCSHA256 and ChipCSCASHA256 are hex fingerprints of the document
+	// signer and anchor certificates, kept for the audit record.
+	ChipDSCSHA256  string `json:"chipDscSha256,omitempty"`
+	ChipCSCASHA256 string `json:"chipCscaSha256,omitempty"`
+	// ChipRaw holds documentData.nfcValues.rawData (base64 "SOD", "DG1",
+	// "DG2", ...) for passive authentication. It is never serialised and never
+	// leaves this service.
+	ChipRaw map[string]string `json:"-"`
+	// ChipPortrait is the face image parsed from the chip's DG2 (base64),
+	// before any FaceTec-supplied crop could replace DocumentData.Portrait.
+	// It is what the SOD can vouch for once DG2's hash has been verified.
+	ChipPortrait string `json:"-"`
 }
 
 // FaceTec Server v10 nfcStatusEnumInt values. USER_PRESSED_SKIP and SUCCESS

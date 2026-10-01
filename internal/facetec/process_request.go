@@ -74,7 +74,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// final and ready to evaluate" — 4 = COMPLETE. Other values (FRONT_RETRY,
 	// BACK, BACK_RETRY, USER_CONFIRM, NFC) mean the SDK still has another step
 	// to perform, so there's nothing to evaluate yet.
-	nextStep, ok, err := lookupInt(results["photoIDNextStepEnumInt"])
+	nextStep, ok, err := lookupEnumInt(results["photoIDNextStepEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: photoIDNextStepEnumInt: %w", err)
 	}
@@ -104,15 +104,33 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	//   mrzStatusEnumInt:               2 = SUCCESS
 	//   nfcAuthenticationStatusEnumInt: 4 = AUTHENTICATED
 	//   barcodeStatusEnumInt:           3 = SUCCESS
-	mrzStatus, _, _ := lookupInt(results["mrzStatusEnumInt"])
-	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
-	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
+	//
+	// A present-but-wrongly-typed value is an error (fail closed): silently
+	// reading it as 0 would turn e.g. a FAILED (3) chip authentication into
+	// "not applicable".
+	mrzStatus, _, err := lookupEnumInt(results["mrzStatusEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: mrzStatusEnumInt: %w", err)
+	}
+	nfcAuthStatus, _, err := lookupEnumInt(results["nfcAuthenticationStatusEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: nfcAuthenticationStatusEnumInt: %w", err)
+	}
+	// Only 0-5 are defined; an unknown (possibly new failure) state must not
+	// slip past the hard chip-auth gate as "neither verified nor failed".
+	if nfcAuthStatus < 0 || nfcAuthStatus > 5 {
+		return nil, false, fmt.Errorf("facetec: nfcAuthenticationStatusEnumInt: unknown value %d", nfcAuthStatus)
+	}
+	barcodeStatus, _, err := lookupEnumInt(results["barcodeStatusEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: barcodeStatusEnumInt: %w", err)
+	}
 
 	// nfcStatusEnumInt only selects which rejection a scan without an
 	// authenticated chip gets (the issuance gate itself is NFCVerified), but
 	// a value that is present and unreadable is still an error rather than
 	// silently becoming "unknown".
-	nfcStatus, ok, err := lookupInt(results["nfcStatusEnumInt"])
+	nfcStatus, ok, err := lookupEnumInt(results["nfcStatusEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: nfcStatusEnumInt: %w", err)
 	}
@@ -128,6 +146,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// cropped/normalized, but don't clobber the NFC-derived portrait with an
 	// empty string when it's absent (confirmed absent in this deployment's
 	// FaceTec Server responses as of 2026-07-29).
+	chipPortrait := extractPortraitFromDG2(documentDataMap(results["documentData"]))
 	if portrait, ok := lookupString(results["photoIDFaceCrop"]); ok {
 		documentData.Portrait = portrait
 	} else if portrait, ok := lookupString(payload["photoIDFaceCrop"]); ok {
@@ -147,6 +166,9 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			NFCVerified:     nfcAuthStatus == 4,
 			NFCStatus:       nfcStatus,
 			BarcodeVerified: barcodeStatus == 3,
+			ChipAuthStatus:  nfcAuthStatus,
+			ChipRaw:         extractNFCRawData(results["documentData"]),
+			ChipPortrait:    chipPortrait,
 		},
 	}, true, nil
 }
@@ -273,6 +295,63 @@ func parseFaceTecGroupedFields(m map[string]any) (DocumentData, bool, error) {
 	return dd, true, nil
 }
 
+// extractNFCRawData returns documentData.nfcValues.rawData as a string map
+// (base64 values), or nil when absent. Non-string or empty values are kept as
+// empty strings, which can only make verification fail, never pass, while
+// still counting as chip evidence.
+func extractNFCRawData(value any) map[string]string {
+	dd := documentDataMap(value)
+	nfcRaw, present := dd["nfcValues"]
+	if !present {
+		return nil
+	}
+	nfcValues, ok := nfcRaw.(map[string]any)
+	if !ok {
+		return malformedRawData
+	}
+	rawAny, present := nfcValues["rawData"]
+	if !present {
+		return nil
+	}
+	rawData, ok := rawAny.(map[string]any)
+	if !ok {
+		return malformedRawData
+	}
+	if len(rawData) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(rawData))
+	for k, v := range rawData {
+		// Keep the key even when the value is unusable: its presence is
+		// evidence that a chip was read, and verification then fails closed.
+		s, _ := v.(string)
+		out[k] = s
+	}
+	return out
+}
+
+// malformedRawData stands in for chip data whose container has the wrong
+// JSON type: non-empty, so it counts as chip evidence, but without a SOD, so
+// it can never verify.
+var malformedRawData = map[string]string{"rawData": ""}
+
+// documentDataMap returns documentData as a map from either its object or
+// JSON-string form, or nil.
+func documentDataMap(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case string:
+		var dd map[string]any
+		if err := json.Unmarshal([]byte(typed), &dd); err != nil {
+			return nil
+		}
+		return dd
+	default:
+		return nil
+	}
+}
+
 // extractPortraitFromDG2 extracts the face image embedded in the NFC chip's
 // DG2 (Encoded Identification Features — Face) data group, when present.
 //
@@ -396,6 +475,15 @@ func remarshalInto(src any, dst any) error {
 func lookupString(value any) (string, bool) {
 	s, ok := value.(string)
 	return s, ok && s != ""
+}
+
+// lookupEnumInt is lookupInt for enum status fields, which FaceTec sends as
+// JSON numbers: a string (even a numeric one) is a wrong type and fails closed.
+func lookupEnumInt(value any) (int, bool, error) {
+	if _, isString := value.(string); isString {
+		return 0, false, fmt.Errorf("unsupported type %T", value)
+	}
+	return lookupInt(value)
 }
 
 func lookupInt(value any) (int, bool, error) {

@@ -271,3 +271,134 @@ func writeTemp(t *testing.T, name, content string) string {
 	}
 	return path
 }
+
+// ── trust (eMRTD PDP) ─────────────────────────────────────────────────────────
+
+func TestLoad_TrustDefaults(t *testing.T) {
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Trust.PDPURL != "" {
+		t.Errorf("Trust.PDPURL: got %q, want empty", cfg.Trust.PDPURL)
+	}
+	if cfg.Trust.Timeout != 5*time.Second {
+		t.Errorf("Trust.Timeout: got %v, want 5s", cfg.Trust.Timeout)
+	}
+	if !cfg.Trust.Required {
+		t.Error("Trust.Required: default must be true (fail closed)")
+	}
+}
+
+func TestLoad_TrustFromYAMLAndEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	if err := os.WriteFile(path, []byte("trust:\n  pdp_url: https://pdp.example.org\n  timeout: 2s\n  required: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Trust.PDPURL != "https://pdp.example.org" || cfg.Trust.Timeout != 2*time.Second || cfg.Trust.Required {
+		t.Errorf("unexpected trust config: %+v", cfg.Trust)
+	}
+
+	t.Setenv("TRUST_PDP_URL", "https://env.example.org")
+	t.Setenv("TRUST_TIMEOUT", "750ms")
+	t.Setenv("TRUST_REQUIRED", "true")
+	cfg, err = config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Trust.PDPURL != "https://env.example.org" || cfg.Trust.Timeout != 750*time.Millisecond || !cfg.Trust.Required {
+		t.Errorf("env should override file: %+v", cfg.Trust)
+	}
+}
+
+func validBase() *config.Config {
+	return &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+		JWT:     config.JWTConfig{Secret: "shared-secret"},
+	}
+}
+
+func TestValidate_TrustRequiredNeedsPDP(t *testing.T) {
+	cfg := validBase()
+	cfg.Trust.Required = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("trust.required without trust.pdp_url must refuse, not skip")
+	}
+	cfg.Trust.PDPURL = "https://pdp.example.org"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TrustNotRequiredAllowsNoPDP(t *testing.T) {
+	cfg := validBase()
+	cfg.Trust.Required = false
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TrustNegativeTimeout(t *testing.T) {
+	cfg := validBase()
+	cfg.Trust.Timeout = -time.Second
+	if err := cfg.Validate(); err == nil {
+		t.Error("negative trust.timeout must be rejected")
+	}
+}
+
+func TestValidate_TrustPDPURLMustBeHTTPBaseURL(t *testing.T) {
+	for _, bad := range []string{":", "pdp.example.org", "ftp://pdp.example.org", "https://"} {
+		cfg := validBase()
+		cfg.Trust.Required = true
+		cfg.Trust.PDPURL = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("trust.pdp_url %q must be rejected at startup", bad)
+		}
+	}
+}
+
+func TestValidate_TrustPDPURLRejectsNonOrigin(t *testing.T) {
+	for _, bad := range []string{"https://pdp.example/base", "https://pdp.example/base?x=y", "https://pdp.example/#f"} {
+		cfg := validBase()
+		cfg.Trust.PDPURL = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("trust.pdp_url %q carries a path/query/fragment and must be rejected", bad)
+		}
+	}
+	cfg := validBase()
+	cfg.Trust.PDPURL = "https://pdp.example:8443/"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("origin with port and trailing slash must be accepted: %v", err)
+	}
+}
+
+func TestValidate_TrustPDPURLRequiresHTTPSExceptLoopback(t *testing.T) {
+	for _, bad := range []string{"http://pdp.example.org", "http://10.0.0.5:8080"} {
+		cfg := validBase()
+		cfg.Trust.PDPURL = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("trust.pdp_url %q is plaintext to a non-loopback host and must be rejected", bad)
+		}
+	}
+	for _, ok := range []string{"http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080", "https://pdp.example.org"} {
+		cfg := validBase()
+		cfg.Trust.PDPURL = ok
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("trust.pdp_url %q must be accepted: %v", ok, err)
+		}
+	}
+}
+
+func TestValidate_TrustPDPURLAtMostOneTrailingSlash(t *testing.T) {
+	cfg := validBase()
+	cfg.Trust.PDPURL = "https://pdp.example///"
+	if err := cfg.Validate(); err == nil {
+		t.Error("multiple trailing slashes must be rejected")
+	}
+}

@@ -30,7 +30,10 @@ jobs:
             -covermode=atomic \
             -coverprofile=coverage.out \
             ./internal/apiv1/... \
+            ./internal/auditlog/... \
             ./internal/config/... \
+            ./internal/emrtd/... \
+            ./internal/facetec/... \
             ./internal/issuerclient/... \
             ./internal/middleware/... \
             ./internal/policy/... \
@@ -62,7 +65,9 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: "v2.11"
+          version: "v2.14.0"
+          # Build with the runner Go toolchain: prebuilt binaries lag the go directive (1.27).
+          install-mode: goinstall
 
   build:
     name: Build

@@ -23,6 +23,10 @@ const (
 	// (FaceTec Server's nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP),
 	// so the assurance level required for issuance was not met.
 	CodeNFCSkipped Code = "nfc_skipped"
+	// CodeChipUntrusted indicates the eMRTD chip data could not be verified
+	// against a trusted document signer and the deployment requires that
+	// (trust.required).
+	CodeChipUntrusted Code = "chip_untrusted"
 	// CodeNFCNotRequested indicates FaceTec's template for the detected
 	// document did not request an NFC read (nfcStatusEnumInt ==
 	// NO_NFC_SPECIFIED_BY_TEMPLATE), so the user was never prompted. It does

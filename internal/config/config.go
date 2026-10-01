@@ -2,11 +2,14 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
+	"github.com/sirosfoundation/go-trust/pkg/authzenclient"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +28,9 @@ type Config struct {
 	Audit AuditConfig `yaml:"audit"`
 	// Review configures operator escalation for borderline results.
 	Review ReviewConfig `yaml:"review"`
+	// Trust configures eMRTD document-signer trust (go-trust PDP), see
+	// docs/adr/002-emrtd-document-signer-trust.md.
+	Trust TrustConfig `yaml:"trust"`
 	// JWT holds the shared JWT validation settings for all tenant authentication.
 	// All tenants use the same secret and issuer; the tenant_id claim selects the tenant.
 	JWT JWTConfig `yaml:"jwt"`
@@ -197,6 +203,25 @@ type JWTConfig struct {
 	RequireAuth bool `yaml:"require_auth" envconfig:"JWT_REQUIRE_AUTH"`
 }
 
+// TrustConfig configures the go-trust PDP that decides whether the Document
+// Signer Certificate of an eMRTD chip chains to a reviewed CSCA.
+type TrustConfig struct {
+	// PDPURL is the base URL of the go-trust AuthZEN PDP (POST {url}/evaluation).
+	// Empty means unconfigured: chips are still verified locally but are never
+	// reported as trusted (chip-trusted=false).
+	PDPURL string `yaml:"pdp_url" envconfig:"TRUST_PDP_URL"`
+	// Timeout bounds each PDP request attempt. Default 5s.
+	Timeout time.Duration `yaml:"timeout" envconfig:"TRUST_TIMEOUT"`
+	// Required, when true (the default), makes the deployment refuse to start
+	// without pdp_url and hard-rejects any passport scan (or scan with no
+	// reported document type) whose chip data was presented but not trusted,
+	// independent of the SPOCP rules. ID cards and driving licences are exempt
+	// and left to the SPOCP rules. Set false only for
+	// development or when the SPOCP rules deliberately do not depend on
+	// chip-trusted.
+	Required bool `yaml:"required" envconfig:"TRUST_REQUIRED"`
+}
+
 // LoggingConfig controls log output.
 type LoggingConfig struct {
 	Level string `yaml:"level" envconfig:"LOG_LEVEL"`
@@ -254,6 +279,28 @@ func (c *Config) Validate() error {
 	}
 	if c.Issuer.Addr == "" {
 		return fmt.Errorf("config: issuer.addr is required")
+	}
+
+	if c.Trust.Required && c.Trust.PDPURL == "" {
+		return fmt.Errorf("config: trust.pdp_url is required when trust.required is true (set trust.required: false only for development)")
+	}
+	if c.Trust.PDPURL != "" {
+		origin, err := authzenclient.ParseBaseURL(c.Trust.PDPURL)
+		if err != nil {
+			return fmt.Errorf("config: trust.pdp_url is invalid: %w", err)
+		}
+		// ParseBaseURL strips path, query and fragment, but the client appends
+		// /evaluation to the configured string as-is: accept only a bare origin.
+		u, _ := url.Parse(origin)
+		if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
+			return fmt.Errorf("config: trust.pdp_url must use https (plain http is only allowed for localhost development)")
+		}
+		if strings.TrimSuffix(c.Trust.PDPURL, "/") != origin {
+			return fmt.Errorf("config: trust.pdp_url must be a bare origin such as %s (no path, query or fragment)", origin)
+		}
+	}
+	if c.Trust.Timeout < 0 {
+		return fmt.Errorf("config: trust.timeout must not be negative")
 	}
 
 	if len(c.Tenants) == 0 {
@@ -355,8 +402,22 @@ func defaultConfig() *Config {
 				RequestsPerMinute: 10,
 			},
 		},
+		Trust: TrustConfig{
+			Timeout:  5 * time.Second,
+			Required: true,
+		},
 		Logging: LoggingConfig{
 			Level: "info",
 		},
 	}
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP, the only
+// place a plaintext PDP connection is tolerated (local development).
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
