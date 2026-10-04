@@ -82,6 +82,7 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any passport scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
+| `session.liveness_proof_ttl` | `SESSION_LIVENESS_PROOF_TTL` | `15m` | How long FaceTec Server's liveness verdict for a `/process-request` session is held, from its liveness step to its final photo ID match result |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 Numeric acceptance thresholds are encoded in the SPOCP rule files themselves rather than as
@@ -291,7 +292,22 @@ require `(chip-trusted true)`: both checks, not either:
 (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type dl) (mrz-verified) (nfc-verified true))
 ```
 
-A scan without an authenticated chip gets a `credentialIssueErrorCode` (with a message in `credentialIssueError`):
+Before the SPOCP rules, `/process-request` applies hard gates that no rule can relax. A refused scan
+gets a `credentialIssueErrorCode`, with a message in `credentialIssueError`.
+
+**Liveness.** FaceTec Server 10 reports whether liveness was proven in `result.livenessProven`, on
+the session's liveness step, a request before the one that completes the photo ID match.
+facetec-api records that verdict under the session's `externalDatabaseRefID` (which the FaceTec
+SDK sends with every request of a session) and issues nothing unless it was `true`
+(`liveness_failed`). A request without `externalDatabaseRefID` cannot be tied to a liveness step
+and is refused the same way. FaceTec 10 gives no liveness score, so a proven session reaches the
+rules with `liveness-score` 100.
+
+**Document expiry.** An expired document (`document_expired`), or one whose expiry date is missing
+or unreadable (`document_unreadable`), is refused. A document is valid through its expiry date,
+compared in UTC. The legacy `/v1/id-scan` endpoint applies the same check.
+
+**Chip.** A scan without an authenticated chip is refused:
 
 | Code | FaceTec `nfcStatusEnumInt` | Meaning |
 |------|----------------------------|---------|

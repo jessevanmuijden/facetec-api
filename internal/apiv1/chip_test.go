@@ -77,7 +77,7 @@ func chipClient(t *testing.T, body string, pdp emrtd.TrustEvaluator, required bo
 
 func process(t *testing.T, c *Client, ctx context.Context) *facetec.ProcessRequestResponse {
 	t.Helper()
-	resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+	resp, err := c.ProcessRequest(ctx, provenSession(t, c, ctx))
 	require.NoError(t, err)
 	assert.Empty(t, resp.TransactionID, "nothing may be issued in these tests")
 	return resp

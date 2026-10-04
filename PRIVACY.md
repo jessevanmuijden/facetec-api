@@ -120,6 +120,7 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 |---|---|---|---|
 | FaceMap bytes | Process RAM (`session.Manager.liveness`) | `session.liveness_ttl` (default **2 min**) | `clear()` on use; TTL eviction; `clear()` on `Manager.Close()` |
 | Liveness score | Process RAM | Same as FaceMap | Same |
+| Liveness verdict of a `/process-request` session (a boolean, keyed by tenant and `externalDatabaseRefID`) | Process RAM (`session.Manager.proofs`) | `session.liveness_proof_ttl` (default **15 min**) | Deleted on use at the session's final result; TTL eviction |
 | Signed credential | Process RAM (`session.Manager.offers`) | `session.offer_ttl` (default **5 min**) | Deleted atomically on first `GET /v1/offer/:txid`; TTL eviction |
 | Request logs | Log sink (operator-configured) | Operator's log retention policy | No personal data in log fields; see §2.3 |
 | Audit log event (`credential_issued`) | Log sink | Operator's log retention policy | Contains: tenant ID, transaction ID, doc type, format, scope, chip trust outcome and reason code, FaceTec `chip_auth_status`, DSC/CSCA certificate fingerprints — **no name, MRZ or biometric data** (the SOD signing time is not logged) |

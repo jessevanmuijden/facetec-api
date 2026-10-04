@@ -149,6 +149,11 @@ type SessionConfig struct {
 	LivenessTTL time.Duration `yaml:"liveness_ttl" envconfig:"SESSION_LIVENESS_TTL"`
 	// OfferTTL is how long a credential offer is retained before redemption.
 	OfferTTL time.Duration `yaml:"offer_ttl"    envconfig:"SESSION_OFFER_TTL"`
+	// LivenessProofTTL is how long FaceTec Server's liveness verdict for a
+	// process-request session is retained, from the session's liveness step
+	// until its final photo ID match result. It covers a whole session: face
+	// scan, both sides of the document and the chip read.
+	LivenessProofTTL time.Duration `yaml:"liveness_proof_ttl" envconfig:"SESSION_LIVENESS_PROOF_TTL"`
 }
 
 // TenantPolicyConfig holds optional per-tenant policy overrides.
@@ -393,8 +398,9 @@ func defaultConfig() *Config {
 			Format: "sdjwt",
 		},
 		Session: SessionConfig{
-			LivenessTTL: 2 * time.Minute,
-			OfferTTL:    5 * time.Minute,
+			LivenessTTL:      2 * time.Minute,
+			OfferTTL:         5 * time.Minute,
+			LivenessProofTTL: 15 * time.Minute,
 		},
 		Security: SecurityConfig{
 			RateLimit: RateLimitConfig{

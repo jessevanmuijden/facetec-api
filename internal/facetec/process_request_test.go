@@ -115,8 +115,10 @@ func TestExtractScanResult_RealPayload(t *testing.T) {
 	if result.IDScan.BarcodeVerified {
 		t.Error("BarcodeVerified: want false (barcodeStatusEnumInt=0)")
 	}
-	if !result.Liveness.Success || result.Liveness.LivenessScore != 1.0 {
-		t.Errorf("Liveness: got success=%v score=%v, want true/1.0",
+	// The final response does not prove liveness; the caller fills it in
+	// from the session's liveness step (LivenessProven).
+	if result.Liveness.Success || result.Liveness.LivenessScore != 0 {
+		t.Errorf("Liveness: got success=%v score=%v, want unset (false/0)",
 			result.Liveness.Success, result.Liveness.LivenessScore)
 	}
 }
@@ -475,5 +477,32 @@ func TestExtractScanResult_NoMatchLevel(t *testing.T) {
 	}
 	if ok {
 		t.Error("expected ok=false when matchLevel missing")
+	}
+}
+
+// TestLivenessProven reads result.livenessProven as FaceTec Server 10 returns
+// it on a session's liveness step (shape taken from a live response:
+// {"result": {"livenessProven": true, "ageV2GroupEnumInt": ...}}).
+func TestLivenessProven(t *testing.T) {
+	cases := []struct {
+		name        string
+		payload     map[string]any
+		wantProven  bool
+		wantVerdict bool
+	}{
+		{"liveness step, proven", map[string]any{"result": map[string]any{"livenessProven": true, "ageV2GroupEnumInt": 3}}, true, true},
+		{"liveness step, not proven", map[string]any{"result": map[string]any{"livenessProven": false}}, false, true},
+		{"not a boolean reads as not proven", map[string]any{"result": map[string]any{"livenessProven": "true"}}, false, true},
+		{"other step: no result", map[string]any{"idScanResultsSoFar": map[string]any{}}, false, false},
+		{"result without a verdict", map[string]any{"result": map[string]any{"ageV2GroupEnumInt": 3}}, false, false},
+		{"result is not an object", map[string]any{"result": "ok"}, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proven, ok := LivenessProven(tc.payload)
+			if proven != tc.wantProven || ok != tc.wantVerdict {
+				t.Errorf("LivenessProven() = (%v, %v), want (%v, %v)", proven, ok, tc.wantProven, tc.wantVerdict)
+			}
+		})
 	}
 }

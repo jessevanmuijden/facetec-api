@@ -64,7 +64,7 @@ func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *
 		ftHTTPClient,
 	)
 
-	ses := session.New(cfg.Session.LivenessTTL, cfg.Session.OfferTTL)
+	ses := session.New(cfg.Session.LivenessTTL, cfg.Session.OfferTTL, cfg.Session.LivenessProofTTL)
 
 	log.Info("connecting to vc issuer", zap.String("addr", cfg.Issuer.Addr))
 	issuer, err := issuerclient.New(issuerclient.Config{
@@ -197,6 +197,15 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", rej
 	}
 
+	if code, msg, rejected := documentExpiryRejection(idScanResult.DocumentData, time.Now()); rejected {
+		c.log.Info("id-scan scan rejected: document expiry",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
+			zap.String("code", string(code)),
+		)
+		return "", "", idverrors.New(code, msg)
+	}
+
 	if err := tc.Policy.EvaluateScan(scanResult); err != nil {
 		c.log.Debug("scan rejected by policy",
 			zap.String("tenant", tc.ID),
@@ -233,6 +242,15 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 
 	resp := &facetec.ProcessRequestResponse{Payload: payload}
 
+	// FaceTec Server reports whether liveness was proven on the session's
+	// liveness step, a request before the one that completes the photo ID
+	// match. Remember the verdict so that final result can require it.
+	if proven, ok := facetec.LivenessProven(payload); ok {
+		if key, hasKey := livenessProofKey(ctx, req.ExternalDatabaseRefID); hasKey {
+			c.sessions.RecordLivenessProof(key, proven)
+		}
+	}
+
 	scanResult, ok, err := facetec.ExtractScanResult(payload)
 	if err != nil {
 		c.log.Warn("process-request result could not be translated for issuance",
@@ -253,6 +271,26 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		resp.CredentialIssueErrCode = string(idverrors.CodeInternalError)
 		return resp, nil
 	}
+
+	// Hard gate: nothing is issued unless FaceTec Server proved liveness
+	// earlier in this same session. The final response does not say so
+	// itself; the verdict was recorded from the liveness step, keyed by the
+	// session's externalDatabaseRefID. Without that ID the session cannot be
+	// tied to a liveness step at all.
+	key, hasKey := livenessProofKey(ctx, req.ExternalDatabaseRefID)
+	if !hasKey || !c.sessions.TakeLivenessProof(key) {
+		c.log.Info("process-request scan rejected: liveness not proven for this session",
+			zap.String("tenant", tc.ID),
+			zap.Bool("has_external_database_ref_id", hasKey),
+		)
+		resp.CredentialIssueError = "liveness was not proven for this session"
+		resp.CredentialIssueErrCode = string(idverrors.CodeLivenessFailed)
+		return resp, nil
+	}
+	// FaceTec 10 reports liveness as proven or not, without a score. A proven
+	// session counts as a full score, so a policy's liveness-score rule still
+	// sees it and an unproven one never reaches the policy.
+	scanResult.Liveness = facetec.LivenessCheckResult{Success: true, LivenessScore: 1.0}
 
 	// Hard gate, independent of per-tenant SPOCP policy thresholds: nothing
 	// is issued unless the document's chip was read and authenticated,
@@ -281,6 +319,19 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		)
 		resp.CredentialIssueError = rej.Message
 		resp.CredentialIssueErrCode = string(rej.Code)
+		return resp, nil
+	}
+
+	// Hard gate: an expired document, or one whose expiry date could not be
+	// read, is not a basis for a credential.
+	if code, msg, rejected := documentExpiryRejection(scanResult.IDScan.DocumentData, time.Now()); rejected {
+		c.log.Info("process-request scan rejected: document expiry",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+			zap.String("code", string(code)),
+		)
+		resp.CredentialIssueError = msg
+		resp.CredentialIssueErrCode = string(code)
 		return resp, nil
 	}
 
@@ -335,6 +386,35 @@ func nfcRejection(r facetec.IDScanResult) (code idverrors.Code, msg string, reje
 	default:
 		return idverrors.CodeNFCNotAuthenticated, "the NFC chip was not authenticated", true
 	}
+}
+
+// livenessProofKey identifies a process-request session for the liveness
+// proof store: the tenant and the client's externalDatabaseRefID, which the
+// FaceTec SDK sends unchanged with every request of one session. hasKey is
+// false when the request carries no externalDatabaseRefID.
+func livenessProofKey(ctx context.Context, externalDatabaseRefID string) (key string, hasKey bool) {
+	if externalDatabaseRefID == "" {
+		return "", false
+	}
+	tenantID := ""
+	if tc, ok := tenant.FromStdContext(ctx); ok {
+		tenantID = tc.ID
+	}
+	return tenantID + "\x00" + externalDatabaseRefID, true
+}
+
+// documentExpiryRejection refuses a document that has expired, or whose
+// expiry date is missing or unreadable. A document is valid through its
+// expiry date; dates are compared in UTC.
+func documentExpiryRejection(doc facetec.DocumentData, now time.Time) (code idverrors.Code, msg string, rejected bool) {
+	expiry, ok := parseISODate(doc.DateOfExpiry)
+	if !ok {
+		return idverrors.CodeDocumentUnreadable, "the document's expiry date could not be read", true
+	}
+	if !now.UTC().Before(expiry.AddDate(0, 0, 1)) {
+		return idverrors.CodeDocumentExpired, "the document has expired", true
+	}
+	return "", "", false
 }
 
 // RedeemOffer retrieves and atomically removes a credential offer by transaction ID.
