@@ -7,7 +7,7 @@ import (
 
 // TestPutTakeLiveness_HappyPath verifies the basic round-trip.
 func TestPutTakeLiveness_HappyPath(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	id, err := m.PutLiveness([]byte("fakemap"), 0.95)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestPutTakeLiveness_HappyPath(t *testing.T) {
 
 // TestTakeLiveness_OneTimeUse verifies that a liveness entry is deleted on first read.
 func TestTakeLiveness_OneTimeUse(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	id, err := m.PutLiveness([]byte("fm"), 1.0)
 	if err != nil {
@@ -48,7 +48,7 @@ func TestTakeLiveness_OneTimeUse(t *testing.T) {
 
 // TestTakeLiveness_Unknown verifies that querying a non-existent ID returns an error.
 func TestTakeLiveness_Unknown(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	if _, err := m.TakeLiveness("no-such-id"); err == nil {
 		t.Fatal("expected error for unknown ID, got nil")
@@ -57,7 +57,7 @@ func TestTakeLiveness_Unknown(t *testing.T) {
 
 // TestTakeLiveness_Expired verifies that entries with a past expiry are rejected.
 func TestTakeLiveness_Expired(t *testing.T) {
-	m := New(-1*time.Millisecond, 5*time.Minute) // negative TTL → already expired
+	m := New(-1*time.Millisecond, 5*time.Minute, 15*time.Minute) // negative TTL → already expired
 
 	id, err := m.PutLiveness([]byte("fm"), 0.5)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestTakeLiveness_Expired(t *testing.T) {
 
 // TestPutTakeOffer_HappyPath verifies the basic offer round-trip.
 func TestPutTakeOffer_HappyPath(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	creds := []string{"cred1", "cred2"}
 	id, err := m.PutOffer(creds, "photo-id")
@@ -93,7 +93,7 @@ func TestPutTakeOffer_HappyPath(t *testing.T) {
 
 // TestTakeOffer_OneTimeUse verifies that an offer entry is deleted on first read.
 func TestTakeOffer_OneTimeUse(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	id, err := m.PutOffer([]string{"cred"}, "scope")
 	if err != nil {
@@ -110,7 +110,7 @@ func TestTakeOffer_OneTimeUse(t *testing.T) {
 
 // TestTakeOffer_Unknown verifies that querying a non-existent offer ID returns an error.
 func TestTakeOffer_Unknown(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	if _, err := m.TakeOffer("no-such-id"); err == nil {
 		t.Fatal("expected error for unknown ID, got nil")
@@ -119,7 +119,7 @@ func TestTakeOffer_Unknown(t *testing.T) {
 
 // TestTakeOffer_Expired verifies that offers with a past expiry are rejected.
 func TestTakeOffer_Expired(t *testing.T) {
-	m := New(2*time.Minute, -1*time.Millisecond)
+	m := New(2*time.Minute, -1*time.Millisecond, 15*time.Minute)
 
 	id, err := m.PutOffer([]string{"c"}, "s")
 	if err != nil {
@@ -133,7 +133,7 @@ func TestTakeOffer_Expired(t *testing.T) {
 
 // TestIDsAreUnique verifies that successive calls to PutLiveness yield different IDs.
 func TestIDsAreUnique(t *testing.T) {
-	m := New(5*time.Minute, 5*time.Minute)
+	m := New(5*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	id1, _ := m.PutLiveness([]byte("a"), 1.0)
 	id2, _ := m.PutLiveness([]byte("b"), 1.0)
@@ -146,7 +146,7 @@ func TestIDsAreUnique(t *testing.T) {
 // TestClose_ZeroesBiometrics verifies that Close stops the reaper and zeroes
 // any in-memory FaceMap bytes before returning.
 func TestClose_ZeroesBiometrics(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 
 	// Store an entry with easily recognisable non-zero bytes.
 	data := []byte{1, 2, 3, 4, 5}
@@ -177,7 +177,7 @@ func TestClose_ZeroesBiometrics(t *testing.T) {
 
 // TestClose_NoEntries verifies that Close succeeds when there are no live entries.
 func TestClose_NoEntries(t *testing.T) {
-	m := New(2*time.Minute, 5*time.Minute)
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
 	// Just ensure it doesn't panic or deadlock.
 	done := make(chan struct{})
 	go func() {
@@ -188,5 +188,60 @@ func TestClose_NoEntries(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Close blocked for more than 1 second")
+	}
+}
+
+func TestLivenessProof_ProvenIsTakenOnce(t *testing.T) {
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
+	defer m.Close()
+
+	m.RecordLivenessProof("tenant\x00ref-1", true)
+
+	if !m.TakeLivenessProof("tenant\x00ref-1") {
+		t.Fatal("a recorded, proven session must report true")
+	}
+	if m.TakeLivenessProof("tenant\x00ref-1") {
+		t.Fatal("a liveness proof must be one-time use")
+	}
+}
+
+func TestLivenessProof_UnknownOrUnprovenIsFalse(t *testing.T) {
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
+	defer m.Close()
+
+	if m.TakeLivenessProof("never-recorded") {
+		t.Fatal("an unknown session must report false")
+	}
+	m.RecordLivenessProof("failed", false)
+	if m.TakeLivenessProof("failed") {
+		t.Fatal("a session whose liveness was not proven must report false")
+	}
+}
+
+func TestLivenessProof_LatestVerdictWins(t *testing.T) {
+	m := New(2*time.Minute, 5*time.Minute, 15*time.Minute)
+	defer m.Close()
+
+	// A retried liveness step: first not proven, then proven.
+	m.RecordLivenessProof("retried", false)
+	m.RecordLivenessProof("retried", true)
+	if !m.TakeLivenessProof("retried") {
+		t.Fatal("a retry that proved liveness must count")
+	}
+
+	m.RecordLivenessProof("regressed", true)
+	m.RecordLivenessProof("regressed", false)
+	if m.TakeLivenessProof("regressed") {
+		t.Fatal("a later unproven verdict must override an earlier proven one")
+	}
+}
+
+func TestLivenessProof_Expired(t *testing.T) {
+	m := New(2*time.Minute, 5*time.Minute, -1*time.Millisecond) // negative TTL → already expired
+	defer m.Close()
+
+	m.RecordLivenessProof("stale", true)
+	if m.TakeLivenessProof("stale") {
+		t.Fatal("an expired liveness proof must report false")
 	}
 }

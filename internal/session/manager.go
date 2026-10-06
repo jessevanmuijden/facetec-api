@@ -1,4 +1,4 @@
-// Package session provides two in-memory, TTL-bounded stores used during the biometric flow.
+// Package session provides in-memory, TTL-bounded stores used during the biometric flow.
 //
 // LivenessStore holds FaceMaps (derived biometric templates) between the liveness and ID-scan
 // steps. Entries expire after a configurable TTL (default 2 minutes) and are one-time-use.
@@ -6,6 +6,12 @@
 //
 // OfferStore holds signed credential tokens between issuance and wallet redemption. Entries
 // expire after a configurable TTL (default 5 minutes) and are one-time-use.
+//
+// The liveness proof store holds FaceTec Server's livenessProven verdict for a FaceTec 10
+// process-request session, between the session's liveness step and its final photo ID match
+// result, which arrive in separate requests. Entries expire after a configurable TTL (default
+// 15 minutes, a whole session: face scan, both sides of the document and the chip read) and are
+// one-time-use. They hold a boolean, no biometric data.
 package session
 
 import (
@@ -33,25 +39,36 @@ type OfferEntry struct {
 	ExpiresAt   time.Time
 }
 
-// Manager holds both in-memory stores with automatic TTL eviction.
+// livenessProof is FaceTec Server's liveness verdict for one process-request session.
+type livenessProof struct {
+	proven    bool
+	expiresAt time.Time
+}
+
+// Manager holds the in-memory stores with automatic TTL eviction.
 type Manager struct {
 	mu       sync.Mutex
 	liveness map[string]*LivenessEntry
 	offers   map[string]*OfferEntry
+	proofs   map[string]*livenessProof
 	livTTL   time.Duration
 	offerTTL time.Duration
+	proofTTL time.Duration
 	done     chan struct{} // closed by Close() to stop the reaper goroutine
 }
 
 // New creates a Manager with the given TTLs.
 // livTTL is the lifetime of a liveness session (FaceMap hold time).
 // offerTTL is the lifetime of a credential offer after issuance.
-func New(livTTL, offerTTL time.Duration) *Manager {
+// proofTTL is the lifetime of a process-request session's liveness verdict.
+func New(livTTL, offerTTL, proofTTL time.Duration) *Manager {
 	m := &Manager{
 		liveness: make(map[string]*LivenessEntry),
 		offers:   make(map[string]*OfferEntry),
+		proofs:   make(map[string]*livenessProof),
 		livTTL:   livTTL,
 		offerTTL: offerTTL,
+		proofTTL: proofTTL,
 		done:     make(chan struct{}),
 	}
 	go m.reap()
@@ -129,7 +146,30 @@ func (m *Manager) TakeOffer(id string) (*OfferEntry, error) {
 	return e, nil
 }
 
-// reap periodically removes expired entries from both stores.
+// RecordLivenessProof stores FaceTec Server's livenessProven verdict for the
+// process-request session identified by key. The latest verdict wins, so a
+// liveness step the user retried and then passed counts as proven.
+func (m *Manager) RecordLivenessProof(key string, proven bool) {
+	m.mu.Lock()
+	m.proofs[key] = &livenessProof{proven: proven, expiresAt: time.Now().Add(m.proofTTL)}
+	m.mu.Unlock()
+}
+
+// TakeLivenessProof reports whether liveness was proven for the session
+// identified by key, and removes the record (one-time use). An unknown,
+// expired or unproven session reports false.
+func (m *Manager) TakeLivenessProof(key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.proofs[key]
+	if !ok {
+		return false
+	}
+	delete(m.proofs, key)
+	return p.proven && !time.Now().After(p.expiresAt)
+}
+
+// reap periodically removes expired entries from the stores.
 // It stops when Close() is called and zeros all remaining biometric data before returning.
 func (m *Manager) reap() {
 	ticker := time.NewTicker(30 * time.Second)
@@ -148,6 +188,11 @@ func (m *Manager) reap() {
 			for id, e := range m.offers {
 				if now.After(e.ExpiresAt) {
 					delete(m.offers, id)
+				}
+			}
+			for key, p := range m.proofs {
+				if now.After(p.expiresAt) {
+					delete(m.proofs, key)
 				}
 			}
 			m.mu.Unlock()

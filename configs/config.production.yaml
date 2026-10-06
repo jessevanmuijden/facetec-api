@@ -35,6 +35,7 @@ trust:
 session:
   liveness_ttl: "2m"
   offer_ttl: "5m"
+  liveness_proof_ttl: "15m"
 
 security:
   app_key_path: "/run/secrets/app_key"

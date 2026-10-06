@@ -153,11 +153,12 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 		documentData.Portrait = portrait
 	}
 
+	// Liveness is deliberately left unset (not proven). The response that
+	// completes the photo ID match does not say whether liveness was proven:
+	// FaceTec Server reports that in result.livenessProven on the session's
+	// liveness step, an earlier request (see LivenessProven). The caller
+	// fills Liveness in from that verdict.
 	return &ScanResult{
-		Liveness: LivenessCheckResult{
-			Success:       true,
-			LivenessScore: 1.0, // liveness is implicit in a successful process-request
-		},
 		IDScan: IDScanResult{
 			Success:         true,
 			FaceMatchLevel:  matchLevel,
@@ -171,6 +172,23 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			ChipPortrait:    chipPortrait,
 		},
 	}, true, nil
+}
+
+// LivenessProven reads FaceTec Server's liveness verdict, result.livenessProven,
+// from a process-request response. ok is false when the response carries no
+// verdict, which is the case for every step except the liveness step. A
+// verdict that is present but not a boolean reads as not proven (fail closed).
+func LivenessProven(payload map[string]any) (proven, ok bool) {
+	result, isMap := payload["result"].(map[string]any)
+	if !isMap {
+		return false, false
+	}
+	value, present := result["livenessProven"]
+	if !present {
+		return false, false
+	}
+	b, isBool := value.(bool)
+	return isBool && b, true
 }
 
 func extractDocumentData(value any) (DocumentData, bool, error) {

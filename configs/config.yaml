@@ -90,6 +90,9 @@ session:
   liveness_ttl: "2m"
   # How long a credential offer is available for wallet redemption.
   offer_ttl: "5m"
+  # How long FaceTec Server's liveness verdict for a /process-request session
+  # is held, from its liveness step to its final photo ID match result.
+  liveness_proof_ttl: "15m"
 
 # ── Security ──────────────────────────────────────────────────────────────────
 security:

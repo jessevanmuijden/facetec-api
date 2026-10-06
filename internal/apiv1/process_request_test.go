@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -49,7 +50,8 @@ const nfcSkippedPayload = `{
 		"documentData": {
 			"givenName": "Alice",
 			"familyName": "Test",
-			"documentType": "passport"
+			"documentType": "passport",
+			"dateOfExpiry": "2099-12-31"
 		}
 	}
 }`
@@ -67,7 +69,8 @@ const nfcCompletedPayload = `{
 		"documentData": {
 			"givenName": "Alice",
 			"familyName": "Test",
-			"documentType": "passport"
+			"documentType": "passport",
+			"dateOfExpiry": "2099-12-31"
 		}
 	}
 }`
@@ -85,7 +88,8 @@ func nfcPayload(nfcStatus, nfcAuthStatus int) string {
 		"documentData": {
 			"givenName": "Alice",
 			"familyName": "Test",
-			"documentType": "passport"
+			"documentType": "passport",
+			"dateOfExpiry": "2099-12-31"
 		}
 	}
 }`, nfcStatus, nfcAuthStatus)
@@ -94,11 +98,25 @@ func nfcPayload(nfcStatus, nfcAuthStatus int) string {
 func newTestClientForProcessRequest(t *testing.T, facetecBody string) *Client {
 	t.Helper()
 	ft := facetecServerStub(t, facetecBody)
+	sessions := session.New(time.Minute, time.Minute, time.Minute)
+	t.Cleanup(sessions.Close)
 	return &Client{
-		cfg: &config.Config{},
-		log: zap.NewNop(),
-		ft:  facetec.NewClient(ft.URL, "", http.DefaultClient),
+		cfg:      &config.Config{},
+		log:      zap.NewNop(),
+		ft:       facetec.NewClient(ft.URL, "", http.DefaultClient),
+		sessions: sessions,
 	}
+}
+
+// provenSession returns the final request of a session whose liveness step
+// FaceTec Server reported as proven, as the liveness gate requires.
+func provenSession(t *testing.T, c *Client, ctx context.Context) *facetec.ProcessRequestRequest {
+	t.Helper()
+	const ref = "test-session-ref"
+	key, ok := livenessProofKey(ctx, ref)
+	require.True(t, ok)
+	c.sessions.RecordLivenessProof(key, true)
+	return &facetec.ProcessRequestRequest{RequestBlob: "opaque", ExternalDatabaseRefID: ref}
 }
 
 // noRulesPolicy returns a policy.Engine with no rules loaded, which
@@ -123,7 +141,7 @@ func TestProcessRequest_NFCSkipped_RejectsWithoutIssuing(t *testing.T) {
 	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
 	ctx := tenant.WithStdContext(t.Context(), tc)
 
-	resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+	resp, err := c.ProcessRequest(ctx, provenSession(t, c, ctx))
 	require.NoError(t, err)
 
 	assert.Equal(t, string(idverrors.CodeNFCSkipped), resp.CredentialIssueErrCode)
@@ -142,7 +160,7 @@ func TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate(t *testing.T) {
 	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
 	ctx := tenant.WithStdContext(t.Context(), tc)
 
-	resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+	resp, err := c.ProcessRequest(ctx, provenSession(t, c, ctx))
 	require.NoError(t, err)
 
 	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
@@ -173,7 +191,7 @@ func TestProcessRequest_ChipNotAuthenticated_RejectsWithoutIssuing(t *testing.T)
 			tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
 			ctx := tenant.WithStdContext(t.Context(), tc)
 
-			resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+			resp, err := c.ProcessRequest(ctx, provenSession(t, c, ctx))
 			require.NoError(t, err)
 
 			assert.Equal(t, string(tt.want), resp.CredentialIssueErrCode)
@@ -200,7 +218,7 @@ func idScanServerStub(t *testing.T, body string) *httptest.Server {
 func newTestClientForIDScan(t *testing.T, idScanBody string) (*Client, string) {
 	t.Helper()
 	ft := idScanServerStub(t, idScanBody)
-	sessions := session.New(time.Minute, time.Minute)
+	sessions := session.New(time.Minute, time.Minute, time.Minute)
 	livenessID, err := sessions.PutLiveness([]byte("fake-facemap"), 1.0)
 	require.NoError(t, err)
 	c := &Client{
@@ -226,7 +244,7 @@ func TestSubmitIDScan_NFCNotVerified_RejectsWithoutIssuing(t *testing.T) {
 		"nfcVerified": false,
 		"mrzVerified": true,
 		"barcodeVerified": true,
-		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport"}
+		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport", "dateOfExpiry": "2099-12-31"}
 	}`)
 	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
 	ctx := tenant.WithStdContext(t.Context(), tc)
@@ -253,7 +271,7 @@ func TestSubmitIDScan_NFCVerified_DoesNotTriggerSkipGate(t *testing.T) {
 		"nfcVerified": true,
 		"mrzVerified": true,
 		"barcodeVerified": true,
-		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport"}
+		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport", "dateOfExpiry": "2099-12-31"}
 	}`)
 	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
 	ctx := tenant.WithStdContext(t.Context(), tc)
